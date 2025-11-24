@@ -1,6 +1,7 @@
 pipeline {
     agent any
     environment {
+        echo "Contacted GitHub and loaded Jenkinsfile..."
         // Assume these are set as Jenkins secrets/credentials
         ACR_USER = credentials('ACR_USERNAME') 
         ACR_PASS = credentials('ACR_PASSWORD')

@@ -1,0 +1,73 @@
+pipeline {
+    agent any
+    environment {
+        // Assume these are set as Jenkins secrets/credentials
+        ACR_USER = credentials('ACR_USERNAME') 
+        ACR_PASS = credentials('ACR_PASSWORD')
+        DEPLOY_IP = 'XX.XX.XX.XX' // IP of the deployment server
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                // Checkout code from the linked GitHub repository
+                git url: 'https://github.com/your-username/genai-pipeline-project.git', branch: 'main'
+            }
+        }
+
+        stage('Databricks Model Prep (Simulation)') {
+            steps {
+                script {
+                    echo "Triggering Databricks job for model preparation..."
+                    // In a real setup, use the Azure Databricks REST API call here
+                    // e.g., using 'sh' or 'curl' to start a job that runs notebook.py
+                    echo "Model training/prep simulated. Artifacts assumed ready."
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                // Build the image using the Dockerfile in the 'api' context
+                script {
+                    docker.withRegistry("https://${env.ACR_REGISTRY}", 'ACR_CREDENTIAL_ID') { // ACR_REGISTRY example: myacr.azurecr.io
+                        def customImage = docker.build("genai-api:${env.BUILD_ID}", "-f api/Dockerfile .")
+                        customImage.push()
+                        customImage.push('latest') // Also tag as latest
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Server') {
+            steps {
+                sshagent(['SSH_CREDENTIAL_ID']) { // Jenkins credential for SSH login
+                    sh """
+                    # Connect to deployment server and deploy
+                    ssh jenkins_user@${DEPLOY_IP} "
+                        docker login ${ACR_REGISTRY} -u ${ACR_USER} -p ${ACR_PASS}
+                        docker pull ${ACR_REGISTRY}/genai-api:${BUILD_ID}
+                        docker stop genai-api-prod || true 
+                        docker rm genai-api-prod || true 
+                        docker run -d --name genai-api-prod -p 5000:5000 ${ACR_REGISTRY}/genai-api:${BUILD_ID}
+                        sudo nginx -s reload
+                    "
+                    """
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                sh "sleep 10" // Give container time to start
+                sh """
+                # Health Check
+                curl --fail http://${DEPLOY_IP}/health
+                
+                # Inference Test
+                curl -X POST -H "Content-Type: application/json" -d '{"prompt": "A good software project is"}' http://${DEPLOY_IP}/generate
+                """
+            }
+        }
+    }
+}
